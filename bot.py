@@ -3,215 +3,147 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 import json
 from datetime import datetime
-import os
 from flask import Flask
 import threading
 
-# ===== আপনার তথ্য দিন =====
+# ===== আপনার তথ্য =====
 BOT_TOKEN = "8647557143:AAGTt9kbdYySkstBgqVxJLEDYjbNt8LBubo"
 ADMIN_IDS = [7587190804, 8271698133]
 CHANNEL_LINK = "https://t.me/your_channel"  # আপনার চ্যানেল লিংক দিন
-# =========================
+# ====================
 
-# Flask অ্যাপ
+# Flask সার্ভার (Rendar এর জন্য)
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 বট চলছে! টেলিগ্রামে /start দিন"
+    return "বট চলছে! টেলিগ্রামে /start দিন"
 
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
-# Flask আলাদা থ্রেডে চালু করুন
-flask_thread = threading.Thread(target=run_flask, daemon=True)
-flask_thread.start()
+# Flask আলাদা থ্রেডে চালান
+threading.Thread(target=run_flask, daemon=True).start()
 
 # লগিং
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-# ইউজার ডাটাবেজ
-USERS_FILE = 'users.json'
+# ইউজার স্টোর
+users_file = 'users.json'
 
-def load_users():
+def get_users():
     try:
-        with open(USERS_FILE, 'r') as f:
+        with open(users_file, 'r') as f:
             return json.load(f)
-    except FileNotFoundError:
-        return {}
-    except Exception as e:
-        logger.error(f"Error loading users: {e}")
+    except:
         return {}
 
 def save_users(users):
-    try:
-        with open(USERS_FILE, 'w') as f:
-            json.dump(users, f, indent=4)
-    except Exception as e:
-        logger.error(f"Error saving users: {e}")
+    with open(users_file, 'w') as f:
+        json.dump(users, f)
 
+# স্টার্ট কমান্ড
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
     # ইউজার সেভ
-    users = load_users()
+    users = get_users()
     users[str(user.id)] = {
         'name': user.first_name,
         'username': user.username,
-        'joined': str(datetime.now())
+        'time': str(datetime.now())
     }
     save_users(users)
     
     # বাটন তৈরি
-    keyboard = [
-        [InlineKeyboardButton("📢 জয়েন্ট আপডেট চ্যানেল", url=CHANNEL_LINK)],
+    buttons = [
+        [InlineKeyboardButton("📢 চ্যানেল", url=CHANNEL_LINK)],
         [InlineKeyboardButton("🆘 হেল্প", callback_data='help')]
     ]
     
-    # এডমিন হলে বাটন দেখান
+    # এডমিন হলে
     if user.id in ADMIN_IDS:
-        keyboard.append([InlineKeyboardButton("👑 এডমিন প্যানেল", callback_data='admin')])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
+        buttons.append([InlineKeyboardButton("👑 এডমিন", callback_data='admin')])
     
     await update.message.reply_text(
-        f"👋 স্বাগতম {user.first_name}!\n\nআমার বটে আপনাকে স্বাগতম। নিচের বাটনগুলো ব্যবহার করুন।",
-        reply_markup=reply_markup
+        f"👋 হ্যালো {user.first_name}!",
+        reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# বাটন ক্লিক
+async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
     if query.data == 'help':
-        await query.edit_message_text("""
-🆘 **হেল্প সেকশন**
-
-**কমান্ডসমূহ:**
-• /start - বট চালু করুন
-• /users - মোট ইউজার সংখ্যা (শুধু এডমিন)
-• /broadcast - বার্তা পাঠান (শুধু এডমিন)
-
-**বাটন:**
-• জয়েন্ট আপডেট চ্যানেল - চ্যানেলে জয়েন করুন
-• হেল্প - এই মেসেজ দেখুন
-""", parse_mode='Markdown')
-    
+        await query.edit_message_text(
+            "🔰 **হেল্প**\n\n"
+            "/start - শুরু\n"
+            "/users - মোট ইউজার (এডমিন)\n"
+            "/broadcast - বার্তা পাঠান (এডমิน)"
+        )
     elif query.data == 'admin':
-        await query.edit_message_text("""
-👑 **এডমিন প্যানেল**
+        await query.edit_message_text(
+            "👑 **এডমিন মেনু**\n\n"
+            "/users - ইউজার সংখ্যা\n"
+            "/broadcast মেসেজ - সবাইকে পাঠান"
+        )
 
-**আপনার কমান্ড:**
-• /users - মোট ইউজার দেখুন
-• /broadcast [বার্তা] - সবাইকে বার্তা পাঠান
-
-**উদাহরণ:**
-/broadcast সবাইকে অভিনন্দন
-""", parse_mode='Markdown')
-
-async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ইউজার সংখ্যা
+async def total_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
-        await update.message.reply_text("⛔ এই কমান্ড শুধুমাত্র এডমিনদের জন্য!")
+        await update.message.reply_text("⛔ অনুমতি নেই")
         return
     
-    users = load_users()
-    total = len(users)
-    
-    # আজকে জয়েন করেছে কতজন
-    today = datetime.now().date()
-    today_count = 0
-    for data in users.values():
-        try:
-            joined = datetime.fromisoformat(data.get('joined', '')).date()
-            if joined == today:
-                today_count += 1
-        except:
-            pass
-    
-    text = f"📊 **ইউজার পরিসংখ্যান**\n\n"
-    text += f"• মোট ইউজার: {total}\n"
-    text += f"• আজকের জয়েন: {today_count}\n"
-    
-    await update.message.reply_text(text, parse_mode='Markdown')
+    users = get_users()
+    await update.message.reply_text(f"📊 মোট ইউজার: {len(users)}")
 
-async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ব্রডকাস্ট
+async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
-        await update.message.reply_text("⛔ এই কমান্ড শুধুমাত্র এডমিনদের জন্য!")
+        await update.message.reply_text("⛔ অনুমতি নেই")
         return
     
     if not context.args:
-        await update.message.reply_text(
-            "⚠️ ** ব্যবহার নিয়ম:**\n"
-            "/broadcast আপনার বার্তা\n\n"
-            "উদাহরণ: /broadcast সবাইকে শুভ সকাল"
-        )
+        await update.message.reply_text("📝 ব্যবহার: /broadcast আপনার বার্তা")
         return
     
-    users = load_users()
-    if not users:
-        await update.message.reply_text("❌ কোন ইউজার নেই!")
-        return
+    users = get_users()
+    msg = ' '.join(context.args)
     
-    message = ' '.join(context.args)
-    total = len(users)
-    
-    status = await update.message.reply_text(f"📤 বার্তা পাঠানো হচ্ছে... 0/{total}")
+    status = await update.message.reply_text(f"পাঠানো হচ্ছে... 0/{len(users)}")
     
     success = 0
-    failed = 0
-    
-    for user_id in users:
+    for uid in users:
         try:
             await context.bot.send_message(
-                chat_id=int(user_id),
-                text=f"📢 **ব্রডকাস্ট বার্তা**\n\n{message}",
-                parse_mode='Markdown'
+                chat_id=int(uid),
+                text=f"📢 {msg}"
             )
             success += 1
-        except Exception as e:
-            failed += 1
-            logger.error(f"Failed to send to {user_id}: {e}")
-        
-        # প্রতি ১০ জন পর পর আপডেট
-        if (success + failed) % 10 == 0:
-            await status.edit_text(f"📤 পাঠানো হচ্ছে... {success + failed}/{total}")
-        
-        # একটু বিরতি
-        import asyncio
-        await asyncio.sleep(0.05)
+        except:
+            pass
     
-    await status.edit_text(
-        f"✅ **সম্পন্ন!**\n\n"
-        f"📊 ফলাফল:\n"
-        f"• সফল: {success}\n"
-        f"• ব্যর্থ: {failed}\n"
-        f"• মোট: {total}"
-    )
+    await status.edit_text(f"✅ সম্পন্ন: {success}/{len(users)}")
 
+# মেইন ফাংশন
 def main():
-    """মেইন ফাংশন"""
-    print("\n" + "="*50)
-    print("🤖 টেলিগ্রাম বট চালু হচ্ছে...")
-    print("="*50)
-    print(f"👑 এডমিন আইডি: {ADMIN_IDS}")
-    print(f"📡 Flask সার্ভার: চালু (পোর্ট 8080)")
-    print("="*50)
+    print("🤖 বট চালু হচ্ছে...")
+    print(f"👑 এডমিন: {ADMIN_IDS}")
     
-    # বট অ্যাপ্লিকেশন তৈরি
-    application = Application.builder().token(BOT_TOKEN).build()
+    # বট তৈরি
+    app = Application.builder().token(BOT_TOKEN).build()
     
-    # হ্যান্ডলার যোগ করুন
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("users", users_command))
-    application.add_handler(CommandHandler("broadcast", broadcast_command))
-    application.add_handler(CallbackQueryHandler(button_callback))
+    # কমান্ড যোগ করুন
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("users", total_users))
+    app.add_handler(CommandHandler("broadcast", send_broadcast))
+    app.add_handler(CallbackQueryHandler(button_click))
     
-    print("✅ বট চালু হয়েছে! টেলিগ্রামে /start দিন")
-    print("="*50 + "\n")
+    print("✅ বট রেডি! টেলিগ্রামে /start দিন")
     
-    # বট চালু করুন
-    application.run_polling()
+    # বট চালান
+    app.run_polling()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
